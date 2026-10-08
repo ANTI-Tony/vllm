@@ -53,6 +53,10 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
     }
     hidden = llm.llm_engine.model_config.get_hidden_size() * 3
 
+    def external_id(rid: str) -> str:
+        # the engine core suffixes request ids ("<id>-<hex>") to keep them unique
+        return rid if rid in expected else rid.rsplit("-", 1)[0]
+
     reader = Ring(tap)
     reader.rewind_to_oldest()
     seqs: dict[str, list[np.ndarray]] = {}
@@ -62,11 +66,11 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
             rid, n, start, _plen, hid, tok, aux = decode_chunk(payload)
             assert hid == hidden
             assert aux.shape == (n, hidden)
-            got = seqs.setdefault(rid, [])
+            got = seqs.setdefault(external_id(rid), [])
             assert start == sum(len(c) for c in got), (rid, start)
             got.append(tok.copy())
         elif kind == K_FINISH:
-            finished.add(decode_id(payload))
+            finished.add(external_id(decode_id(payload)))
         else:
             assert kind != K_GAP, "a step was dropped"
     assert finished == set(expected)
