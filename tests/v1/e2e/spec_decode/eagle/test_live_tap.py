@@ -81,7 +81,17 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
             assert kind != K_GAP, "a step was dropped"
     assert finished - flushed_ids == set(expected)
     for rid, full in expected.items():
-        got = np.concatenate(seqs[rid]).tolist()
+        chunks = seqs[rid]
+        got = np.concatenate(chunks).tolist()
         # the last sampled tokens (bonus + EOS) never get a hidden state
-        assert len(got) >= len(full) - 4
-        assert got == full[: len(got)], rid
+        assert len(got) >= len(full) - 4, (rid, len(got), len(full))
+        if got != full[: len(got)]:
+            i = next(k for k, (x, y) in enumerate(zip(got, full)) if x != y)
+            bounds = np.cumsum([len(c) for c in chunks]).tolist()
+            pytest.fail(
+                f"request {rid}: first mismatch at position {i} of {len(got)} "
+                f"(prompt {len(outputs[0].prompt_token_ids)} tokens); chunk sizes "
+                f"{[len(c) for c in chunks]} boundaries {bounds}; "
+                f"tap {got[max(0, i - 4) : i + 6]} "
+                f"vs expected {full[max(0, i - 4) : i + 6]}"
+            )
