@@ -17,7 +17,8 @@ File layout (default /dev/shm):
              u32 flags, req_id (padded to 8), int32 tokens[n],
              int16 aux[n * hidden] (bf16 bit patterns); the rows cover
              positions start_pos .. start_pos + n - 1 of the request
-    FINISH : u32 id_len, u32 pad, req_id   -- the request is complete
+    FINISH : u32 id_len, u32 pad, req_id   -- the request is complete (written
+             when the runner learns of it, i.e. at the next scheduler step)
     GAP    : same as FINISH                -- a step was dropped: discard it
 `seq` is a logical byte offset that only grows; `oldest_seq` is the start of
 the oldest intact record, so a reader that falls behind it has been lapped and

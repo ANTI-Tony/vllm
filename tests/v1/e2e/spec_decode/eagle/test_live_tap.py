@@ -51,11 +51,17 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
         o.request_id: list(o.prompt_token_ids) + list(o.outputs[0].token_ids)
         for o in outputs
     }
+    # FINISH markers are written when the runner learns of finished requests, i.e.
+    # at the next scheduler step: run one more tiny request so the last ones flush
+    flush = llm.generate(["flush"], SamplingParams(temperature=0, max_tokens=1))
+    flushed_ids = {o.request_id for o in flush}
     hidden = llm.llm_engine.model_config.get_hidden_size() * 3
 
     def external_id(rid: str) -> str:
         # the engine core suffixes request ids ("<id>-<hex>") to keep them unique
-        return rid if rid in expected else rid.rsplit("-", 1)[0]
+        if rid in expected or rid in flushed_ids:
+            return rid
+        return rid.rsplit("-", 1)[0]
 
     reader = Ring(tap)
     reader.rewind_to_oldest()
@@ -73,7 +79,7 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
             finished.add(external_id(decode_id(payload)))
         else:
             assert kind != K_GAP, "a step was dropped"
-    assert finished == set(expected)
+    assert finished - flushed_ids == set(expected)
     for rid, full in expected.items():
         got = np.concatenate(seqs[rid]).tolist()
         # the last sampled tokens (bonus + EOS) never get a hidden state
