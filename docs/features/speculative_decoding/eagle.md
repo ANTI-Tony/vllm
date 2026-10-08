@@ -65,3 +65,31 @@ A variety of EAGLE draft models are available on the Hugging Face hub:
 
 !!! warning
     If you are using `vllm<0.7.0`, please use [this script](https://gist.github.com/abhigoyal1997/1e7a4109ccb7704fbc67f625e86b2d6d) to convert the speculative model and specify `"model": "path/to/modified/eagle/model"` in `speculative_config`.
+
+## Exporting Live Training Data for the Draft Model
+
+EAGLE-3 heads are trained on the target model's auxiliary hidden states, which the
+engine already computes for every committed token. Setting `VLLM_SPEC_LIVE_TAP`
+makes the model runner stream the `(token id, aux hidden state)` pairs of every
+committed position, per request, into a shared-memory ring buffer so that a
+co-located training process can keep the draft model adapted to the traffic
+actually being served (and reload it with `reload_draft_weights`):
+
+```bash
+VLLM_SPEC_LIVE_TAP=/dev/shm/draft_tap \
+VLLM_SPEC_LIVE_TAP_GB=4 \
+vllm serve Qwen/Qwen3-8B --no-enable-prefix-caching \
+    --speculative-config '{"method": "eagle3", "model": "AngelSlim/Qwen3-8B_eagle3", "num_speculative_tokens": 3}'
+```
+
+* `VLLM_SPEC_LIVE_TAP_GB` sizes the ring (default 4 GiB); when the reader falls
+  behind, the oldest records are overwritten, so the newest traffic always wins.
+* `VLLM_SPEC_LIVE_TAP_RATE` samples a fraction of the requests (default 1.0).
+* The device-to-host copy is non-blocking and the file is written by a background
+  thread; with a Qwen3-8B target at full load the export costs about 1-2% of
+  throughput. Only tensor-parallel rank 0 writes.
+* Prefix caching must be disabled: positions served from the prefix cache have no
+  hidden state to export.
+
+The record format is documented in `vllm/v1/spec_decode/live_tap.py`; `Ring` in
+the same module is the reader side.

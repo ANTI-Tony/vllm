@@ -188,6 +188,7 @@ from vllm.v1.spec_decode.draft_model import DraftModelProposer
 from vllm.v1.spec_decode.eagle import EagleProposer
 from vllm.v1.spec_decode.extract_hidden_states import ExtractHiddenStatesProposer
 from vllm.v1.spec_decode.gemma4 import Gemma4Proposer
+from vllm.v1.spec_decode.live_tap import LiveTap
 from vllm.v1.spec_decode.medusa import MedusaProposer
 from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.spec_decode.ngram_proposer_gpu import (
@@ -695,6 +696,8 @@ class GPUModelRunner(
 
         # Request states.
         self.requests: dict[str, CachedRequestState] = {}
+        # Live training-data tap: None unless VLLM_SPEC_LIVE_TAP is set.
+        self.live_tap: LiveTap | None = LiveTap.from_env(self, log=logger.info)
         # NOTE(rob): num_prompt_logprobs only includes reqs
         # that are currently in the prefill phase.
         self.num_prompt_logprobs: dict[str, int] = {}
@@ -1202,6 +1205,8 @@ class GPUModelRunner(
             req_state = self.requests.pop(req_id, None)
             self._on_request_state_removed(req_id, req_state)
             self.num_prompt_logprobs.pop(req_id, None)
+        if self.live_tap is not None and scheduler_output.finished_req_ids:
+            self.live_tap.finish(scheduler_output.finished_req_ids)
         self.late_interaction_runner.on_requests_finished(
             scheduler_output.finished_req_ids
         )
@@ -5190,6 +5195,23 @@ class GPUModelRunner(
                     else:
                         target_hidden_states = hidden_states[:total_num_tokens]
 
+            if self.live_tap is not None:
+                compacted = (
+                    spec_decode_metadata is not None
+                    and spec_config.disable_padded_drafter_batch
+                )
+                self.live_tap.record(
+                    scheduler_output,
+                    self.input_batch,
+                    self.requests,
+                    target_token_ids,
+                    target_hidden_states,
+                    num_rejected_tokens_gpu,
+                    spec_decode_metadata.num_draft_tokens
+                    if spec_decode_metadata is not None
+                    else None,
+                    common_attn_metadata.query_start_loc_cpu if compacted else None,
+                )
             if self.supports_mm_inputs and self.drafter.supports_mm_inputs:
                 mm_embed_inputs = self._gather_mm_embeddings(
                     scheduler_output,
