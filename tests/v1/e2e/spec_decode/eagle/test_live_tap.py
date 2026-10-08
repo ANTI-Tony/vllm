@@ -30,6 +30,8 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
     tap = str(tmp_path / "tap")
     monkeypatch.setenv("VLLM_SPEC_LIVE_TAP", tap)
     monkeypatch.setenv("VLLM_SPEC_LIVE_TAP_GB", "0.5")
+    # the tap lives in the V1 GPU model runner (the V2 runner port is pending)
+    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
     llm = LLM(
         model=MODEL,
         speculative_config={

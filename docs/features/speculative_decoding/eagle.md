@@ -90,6 +90,8 @@ vllm serve Qwen/Qwen3-8B --no-enable-prefix-caching \
   throughput. Only tensor-parallel rank 0 writes.
 * Prefix caching must be disabled: positions served from the prefix cache have no
   hidden state to export.
+* The tap is implemented in the V1 GPU model runner; set
+  `VLLM_USE_V2_MODEL_RUNNER=0` where the V2 runner would be selected by default.
 
 The record format is documented in `vllm/v1/spec_decode/live_tap.py`; `Ring` in
 the same module is the reader side.
