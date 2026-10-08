@@ -127,7 +127,6 @@ def test_record_exports_committed_positions(tmp_path):
         num_draft_tokens=[3, 0],
     )
     tap.finish(["A"])
-    tap.q.join() if hasattr(tap.q, "join") else None
     reader = Ring(path)
     reader.rewind_to_oldest()
     deadline = 50
