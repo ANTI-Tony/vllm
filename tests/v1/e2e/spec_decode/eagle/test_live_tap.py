@@ -83,9 +83,17 @@ def test_live_tap_reconstructs_committed_tokens(tmp_path, monkeypatch, padded_ba
     for rid, full in expected.items():
         chunks = seqs[rid]
         got = np.concatenate(chunks).tolist()
-        # the last sampled tokens (bonus + EOS) never get a hidden state
-        assert len(got) >= len(full) - 4, (rid, len(got), len(full))
-        if got != full[: len(got)]:
+        # The last sampled tokens (bonus + EOS) never get a hidden state, and
+        # drafts the verifier accepted in the final step past EOS / max_tokens
+        # are exported although the request's output was truncated before them.
+        k = 3
+        assert len(full) - 4 <= len(got) <= len(full) + k + 1, (
+            rid,
+            len(got),
+            len(full),
+        )
+        n = min(len(got), len(full))
+        if got[:n] != full[:n]:
             i = next(k for k, (x, y) in enumerate(zip(got, full)) if x != y)
             bounds = np.cumsum([len(c) for c in chunks]).tolist()
             pytest.fail(
