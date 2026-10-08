@@ -592,6 +592,9 @@ class Worker(WorkerBase):
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
 
+    def set_speculation(self, *args, **kwargs) -> None:
+        self.model_runner.set_speculation(*args, **kwargs)
+
     def reload_weights(self, *args, **kwargs) -> None:
         with set_current_vllm_config(self.vllm_config):
             self.model_runner.reload_weights(*args, **kwargs)

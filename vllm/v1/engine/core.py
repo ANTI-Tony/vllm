@@ -1037,6 +1037,13 @@ class EngineCore:
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
     ) -> list[_R]:
+        if method == "set_speculation":
+            # The switch has a scheduler half (stop scheduling draft slots) and a
+            # worker half (stop proposing); keep both in step.
+            enabled = (kwargs or {}).get("enabled", args[0] if args else "1")
+            self.scheduler.set_speculation(
+                str(enabled).lower() in ("1", "true", "on", "yes")
+            )
         return self.model_executor.collective_rpc(method, timeout, args, kwargs)
 
     def set_weight_version(self, weight_version: str) -> None:

@@ -698,6 +698,8 @@ class GPUModelRunner(
         self.requests: dict[str, CachedRequestState] = {}
         # Live training-data tap: None unless VLLM_SPEC_LIVE_TAP is set.
         self.live_tap: LiveTap | None = LiveTap.from_env(self, log=logger.info)
+        # Runtime speculation switch (set_speculation): False -> no drafts are proposed.
+        self.spec_enabled = True
         # NOTE(rob): num_prompt_logprobs only includes reqs
         # that are currently in the prefill phase.
         self.num_prompt_logprobs: dict[str, int] = {}
@@ -4576,6 +4578,46 @@ class GPUModelRunner(
                 self._copy_draft_token_ids_to_cpu(scheduler_output)
 
         spec_config = self.speculative_config
+        if spec_config is not None and not self.spec_enabled:
+            # Speculation switched off at runtime: propose no drafts (the
+            # scheduler then decodes plainly). Keep the live tap fed from the
+            # target's outputs, only for steps without drafts (all positions committed).
+            if (
+                self.live_tap is not None
+                and aux_hidden_states is not None
+                and spec_decode_metadata is None
+            ):
+                n = scheduler_output.total_num_scheduled_tokens
+                self.live_tap.record(
+                    scheduler_output,
+                    self.input_batch,
+                    self.requests,
+                    self.input_ids.gpu[:n],
+                    torch.cat([h[:n] for h in aux_hidden_states], dim=-1),
+                )
+            # Same bookkeeping as when the input does not fit in the drafter: the
+            # valid sampled-token counts of this (possibly drafted) batch are still
+            # needed, only the proposal is skipped.
+            if (
+                spec_config.use_eagle()
+                or spec_config.uses_draft_model()
+                or spec_config.uses_extract_hidden_states()
+            ) and not spec_config.disable_padded_drafter_batch:
+                next_token_ids, valid_sampled_tokens_count = (
+                    self.drafter.prepare_next_token_ids_padded(
+                        sampler_output.sampled_token_ids,
+                        self.requests,
+                        self.input_batch,
+                        self.discard_request_mask.gpu,
+                    )
+                )
+                self._copy_valid_sampled_token_count(
+                    next_token_ids, valid_sampled_tokens_count
+                )
+                # The bookkeeping expects the next token per request to be cached
+                # when the batch carried drafts (propose_draft_token_ids does it).
+                self.input_batch.prev_sampled_token_ids = next_token_ids.unsqueeze(1)
+            spec_config = None
         draft_after_bookkeeping = False
         if spec_config is not None:
             # Decide whether to run the drafter or zero out draft tokens.
@@ -5496,6 +5538,12 @@ class GPUModelRunner(
             return tuple(layer_ids)
 
         return None
+
+    def set_speculation(self, enabled="1") -> None:
+        """Runtime switch for speculative decoding. Off: no drafts are proposed and the
+        scheduler decodes one token per step; the drafter stays loaded."""
+        self.spec_enabled = str(enabled).lower() in ("1", "true", "on", "yes")
+        logger.info("speculation %s", "enabled" if self.spec_enabled else "disabled")
 
     def reload_weights(
         self,

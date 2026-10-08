@@ -280,6 +280,9 @@ class Scheduler(SchedulerInterface):
         self.use_eagle = False
         self.use_eagle_block_drop = False
         self.num_spec_tokens = vllm_config.num_speculative_tokens
+        # Runtime speculation switch (set_speculation): False -> no draft slots are
+        # scheduled, i.e. plain one-token-per-step decoding until switched back on.
+        self.spec_enabled = True
         self.num_lookahead_tokens = vllm_config.num_lookahead_tokens
         # DSV41 SWA bounded replay: groups that declare a replay window are rebuilt
         # after a prefix hit by recomputing its trailing tokens. One window
@@ -1098,7 +1101,10 @@ class Scheduler(SchedulerInterface):
                     # preserve full cudagraph for this step.
                     # Not for diffusion where draft tokens can't be padded.
                     if (
-                        (self.num_spec_tokens > 0 and self.dynamic_sd_lookup is None)
+                        self.spec_enabled
+                        and (
+                            self.num_spec_tokens > 0 and self.dynamic_sd_lookup is None
+                        )
                         and self.num_sampled_tokens_per_step > 0
                         and num_new_tokens == 1
                         and not prefill_scheduled
@@ -1449,7 +1455,7 @@ class Scheduler(SchedulerInterface):
         pending_kv_cache_block_copies = kv_cache_block_copies or None
 
         # Dynamic speculative decoding: compute optimal K
-        num_spec_tokens_to_schedule = self.num_spec_tokens
+        num_spec_tokens_to_schedule = self.num_spec_tokens if self.spec_enabled else 0
         if self.dynamic_sd_lookup is not None and len(num_scheduled_tokens) > 0:
             num_spec_tokens_to_schedule = self.dynamic_sd_lookup[
                 len(num_scheduled_tokens)
@@ -2956,6 +2962,10 @@ class Scheduler(SchedulerInterface):
     ########################################################################
     # KV Connector Related Methods
     ########################################################################
+
+    def set_speculation(self, enabled: bool) -> None:
+        """Runtime switch: off = schedule no speculative tokens (plain decoding)."""
+        self.spec_enabled = bool(enabled)
 
     def get_kv_connector(self) -> KVConnectorBase_V1 | None:
         return self.connector
